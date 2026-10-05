@@ -22,10 +22,12 @@ package com.twoeightnine.root.xvii.login
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.text.method.LinkMovementMethod
 import android.webkit.CookieManager
 import android.webkit.CookieSyncManager
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.viewModels
@@ -289,15 +291,54 @@ class LoginActivity : BaseActivity() {
             private val onLoggedIn: (String, Int) -> Unit
     ) : WebViewClient() {
 
+        private var isHandled = false
+
+        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+            val url = request?.url?.toString() ?: return false
+            return processUrl(url) || super.shouldOverrideUrlLoading(view, request)
+        }
+
+        @Deprecated("Deprecated in Java")
+        @Suppress("DEPRECATION")
+        override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+            if (url == null) return false
+            return processUrl(url) || super.shouldOverrideUrlLoading(view, url)
+        }
+
+        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+            super.onPageStarted(view, url, favicon)
+            if (url != null) {
+                processUrl(url)
+            }
+        }
+
         override fun onPageFinished(view: WebView, url: String) {
             super.onPageFinished(view, url)
-            switchToWebView()
-            if (url.startsWith(App.REDIRECT_URL_WEB_VIEW)) {
-                switchToLoader()
-                val token = extract(url, "access_token=(.*?)&")
-                val uid = extract(url, "user_id=(\\d*)").toIntOrNull() ?: 0
-                onLoggedIn(token, uid)
+            if (!processUrl(url)) {
+                switchToWebView()
             }
+        }
+
+        private fun processUrl(url: String): Boolean {
+            if (url.startsWith(App.REDIRECT_URL_WEB_VIEW) || url.contains("access_token=")) {
+                if (!isHandled) {
+                    val token = extract(url, "access_token=([^&#]+)")
+                    if (token.isNotEmpty()) {
+                        isHandled = true
+                        switchToLoader()
+                        val uid = extract(url, "user_id=(\\d+)").toIntOrNull() ?: 0
+                        onLoggedIn(token, uid)
+                        return true
+                    } else if (url.contains("error=")) {
+                        isHandled = true
+                        switchToLoginView()
+                        return true
+                    }
+                } else {
+                    return true
+                }
+            }
+            return false
         }
 
         private fun extract(from: String, regex: String): String {
@@ -306,7 +347,7 @@ class LoginActivity : BaseActivity() {
             if (!matcher.find()) {
                 return ""
             }
-            return matcher.toMatchResult().group(1)
+            return matcher.group(1) ?: ""
         }
     }
 
